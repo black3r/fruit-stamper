@@ -1,197 +1,160 @@
 open Reprocessing;
 
-let g = 200.;
-let fruitSize = 64;
-let fruitSizef = 64.;
+module MapString = Map.Make(String);
 
-type objectT = {
-  x: float,
-  y: float,
-  vx: float,
-  vy: float,
-  r: float,
-  vr: float,
-  kind: string,
+type fruitType =
+  | Apple
+  | Banana
+  | Pineapple;
+
+let fruitToFilename = (fruit: fruitType) =>
+  switch (fruit) {
+  | Apple => "apple"
+  | Banana => "banana"
+  | Pineapple => "pineapple"
+  };
+
+let fruits = [Apple, Banana, Pineapple];
+let randomFruit = () =>
+  List.nth(fruits, Utils.random(~min=0, ~max=List.length(fruits)));
+
+type fruitSize =
+  | Small
+  | Medium
+  | Big;
+
+let randomSize = () =>
+  switch (Utils.random(~min=0, ~max=3)) {
+  | 0 => Small
+  | 1 => Medium
+  | 2 => Big
+  | _ => Small
+  };
+
+let fruitSizeToInt = size =>
+  switch (size) {
+  | Small => 50
+  | Medium => 100
+  | Big => 150
+  };
+
+type stamp = {
+  position: (int, int),
+  fruitType,
+  size: fruitSize,
 };
-
-module AssetMap = Map.Make(String);
 
 type state = {
-  fruits: list(objectT),
-  halves: list(objectT),
   bg: imageT,
-  assetMap: AssetMap.t(imageT),
+  assetMap: MapString.t(imageT),
+  stamps: list(stamp),
+  currentFruit: fruitType,
+  size: fruitSize,
 };
 
-let possibleFruits = ["banana", "pineapple", "apple", "coconut", "orange"];
-
-let spawnFruit = state => {
-  ...state,
-  fruits: [
-    {
-      x: Utils.randomf(~min=100., ~max=500.),
-      y: 600.,
-      r: 0.,
-      vr: Utils.randomf(~min=-5., ~max=5.),
-      vx: Utils.randomf(~min=-100., ~max=100.),
-      vy: (-400.) +. Utils.randomf(~min=-100., ~max=100.),
-      kind: List.nth(possibleFruits, Utils.random(~min=0, ~max=5)),
-    },
-    ...state.fruits,
-  ],
-};
-
-let drawWithRotation = (img, ~pos as (x, y), ~height, ~width, ~rot, env) => {
-  Draw.pushMatrix(env);
-  Draw.translate(~x, ~y, env);
-  Draw.rotate(rot, env);
-  Draw.translate(
-    ~x=float_of_int(width) /. (-2.),
-    ~y=float_of_int(height) /. (-2.),
+let loadFruit = (fruit, env) =>
+  Draw.loadImage(
+    ~filename="./assets/" ++ fruitToFilename(fruit) ++ ".png",
     env,
-  );
-  Draw.image(img, ~pos=(0, 0), ~height, ~width, env);
-  Draw.popMatrix(env);
-};
-
-let applyGravity = (dt, g, {x, y, r, vr, vx, vy, kind}) => {
-  x: x +. dt *. vx,
-  y: y +. dt *. vy,
-  r: r +. dt *. vr,
-  vr,
-  vy: vy +. dt *. g,
-  vx,
-  kind,
-};
-
-let drawObjectList = (l, assetMap, env) =>
-  List.iter(
-    ({x, y, r, kind}) =>
-      drawWithRotation(
-        AssetMap.find(kind, assetMap),
-        ~pos=(x, y),
-        ~width=fruitSize,
-        ~height=fruitSize + 20,
-        ~rot=r,
-        env,
-      ),
-    l,
-  );
-
-let loadAssetMap = env =>
-  List.fold_left(
-    (assetMap, fruitName) => {
-      let assetMap =
-        AssetMap.add(
-          fruitName,
-          Draw.loadImage(
-            ~filename="./assets/" ++ fruitName ++ "_small.png",
-            env,
-          ),
-          assetMap,
-        );
-      let assetMap =
-        AssetMap.add(
-          fruitName ++ "_half_1",
-          Draw.loadImage(
-            ~filename="./assets/" ++ fruitName ++ "_half_1_small.png",
-            env,
-          ),
-          assetMap,
-        );
-      let assetMap =
-        AssetMap.add(
-          fruitName ++ "_half_2",
-          Draw.loadImage(
-            ~filename="./assets/" ++ fruitName ++ "_half_2_small.png",
-            env,
-          ),
-          assetMap,
-        );
-      assetMap;
-    },
-    AssetMap.empty,
-    possibleFruits,
   );
 
 let setup = env => {
   Env.size(~width=600, ~height=600, env);
-  spawnFruit({
-    fruits: [],
-    halves: [],
-    bg: Draw.loadImage(~filename="./assets/background.png", env),
-    assetMap: loadAssetMap(env),
-  });
+  let bg = Draw.loadImage(~filename="./assets/background.png", env);
+  let assetMap =
+    fruits
+    |> List.fold_left(
+         (map, fruit) =>
+           map
+           |> MapString.add(fruitToFilename(fruit), loadFruit(fruit, env)),
+         MapString.empty,
+       );
+  {bg, assetMap, stamps: [], currentFruit: Apple, size: Small};
+};
+
+let getFruitImage = (assetMap, fruit) =>
+  assetMap |> MapString.find(fruitToFilename(fruit));
+
+let getMousePositionCentered = (state, env) => {
+  let (mx, my) = env |. Env.mouse;
+  let imgPosition = (
+    mx - fruitSizeToInt(state.size) / 2,
+    my - fruitSizeToInt(state.size) / 2,
+  );
+  imgPosition;
 };
 
 let draw = (state, env) => {
-  let dt = Env.deltaTime(env);
-  let bottom = float_of_int(Env.height(env));
-  Draw.background(Utils.color(~r=100, ~g=80, ~b=29, ~a=255), env);
   Draw.image(state.bg, ~pos=(0, 0), env);
-  drawObjectList(state.halves, state.assetMap, env);
-  drawObjectList(state.fruits, state.assetMap, env);
-
-  let state = Utils.random(~min=0, ~max=50) == 1 ? spawnFruit(state) : state;
-
-  let state = {
-    ...state,
-    fruits: List.map(applyGravity(dt, g), state.fruits),
-    halves: List.map(applyGravity(dt, g *. 4.), state.halves),
-  };
-  let (mx, my) = Env.mouse(env);
-  let mousef = (float_of_int(mx), float_of_int(my));
-  let halfFruitf = fruitSizef /. 2.;
-  let halfFruitf = 0.;
-  let (sliced, unsliced) =
-    List.partition(
-      ({x, y}) =>
-        Utils.distf(~p1=(x +. halfFruitf, y +. halfFruitf), ~p2=mousef)
-        < fruitSizef
-        -. 20.,
-      state.fruits,
-    );
-  let calcVY = r => {
-    let vy = Utils.randomf(~min=100., ~max=300.);
-    sin(r +. Constants.pi /. 2.) > 0. ? -. vy : vy;
-  };
-  let newHalves =
-    List.flatten(
-      List.map(
-        ({x, y, r, kind}) => [
-          {
-            x,
-            y: y +. 5.,
-            vx: Utils.randomf(~min=-30., ~max=30.),
-            vy: -. calcVY(r),
-            r,
-            vr: 0.,
-            kind: kind ++ "_half_1",
-          },
-          {
-            x,
-            y: y -. 5.,
-            vx: Utils.randomf(~min=-30., ~max=50.),
-            vy: calcVY(r),
-            r,
-            vr: 0.,
-            kind: kind ++ "_half_2",
-          },
-        ],
-        sliced,
-      ),
-    );
-
-  let state = {...state, fruits: unsliced, halves: state.halves @ newHalves};
-
-  /* Remove old stuff */
-  let state = {
-    ...state,
-    fruits: List.filter(({y}) => y < bottom +. halfFruitf, state.fruits),
-    halves: List.filter(({y}) => y < bottom +. halfFruitf, state.halves),
-  };
-
+  let getFruitImage = getFruitImage(state.assetMap);
+  let _ =
+    state.stamps
+    |> List.map(stamp =>
+         Draw.image(
+           getFruitImage(stamp.fruitType),
+           ~pos=stamp.position,
+           ~width=fruitSizeToInt(stamp.size),
+           ~height=fruitSizeToInt(stamp.size),
+           env,
+         )
+       );
+  let appleImg = getFruitImage(state.currentFruit);
+  let imgPosition = getMousePositionCentered(state, env);
+  Draw.tint({r: 0.8, g: 0.8, b: 0.8, a: 0.5}, env);
+  Draw.image(
+    appleImg,
+    ~pos=imgPosition,
+    ~width=fruitSizeToInt(state.size),
+    ~height=fruitSizeToInt(state.size),
+    env,
+  );
+  Draw.noTint(env);
+  Draw.scale(~x=0.5, ~y=0.5, env);
+  Draw.text(~body="Press 1, 2, 3 to change stamp size", ~pos=(10, 10), env);
+  Draw.text(~body="Press A, B, P to change fruit type", ~pos=(10, 50), env);
+  Draw.text(~body="Press R to clear drawing board", ~pos=(10, 90), env);
+  Draw.scale(~x=1.5, ~y=1.5, env);
+  Draw.text(~body="Click to stamp!", ~pos=(10, 90), env);
   state;
 };
 
-run(~setup, ~draw, ());
+let mouseDown = (state, env) => {
+  ...state,
+  stamps: [
+    {
+      position: getMousePositionCentered(state, env),
+      fruitType: state.currentFruit,
+      size: state.size,
+    },
+    ...state.stamps,
+  ],
+  currentFruit: randomFruit(),
+  size: randomSize(),
+};
+
+let keyPressed = (state, env) => {
+  let newState = {
+    ...state,
+    currentFruit:
+      switch (Env.keyCode(env)) {
+      | A => Apple
+      | B => Banana
+      | P => Pineapple
+      | _ => state.currentFruit
+      },
+    size:
+      switch (Env.keyCode(env)) {
+      | Num_1 => Small
+      | Num_2 => Medium
+      | Num_3 => Big
+      | _ => state.size
+      },
+  };
+  if (Env.keyCode(env) == R) {
+    {...state, stamps: [], size: Small};
+  } else {
+    newState;
+  };
+};
+
+run(~setup, ~draw, ~mouseDown, ~keyPressed, ());
