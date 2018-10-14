@@ -3,6 +3,8 @@ Reason Dojo ?: Fruit Stamper
 
 Reference project for our Reason Dojo ?.
 
+![Animation of project](./fruitstamper.gif)
+
 ### Install
 
 ```
